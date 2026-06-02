@@ -74,6 +74,11 @@ def handle_menu(store: KioskStore) -> None:
             f"\t{item.id}. {item.name} ({item.category}) - {format_money(item.price)}"
             f"{description}"
         )
+        
+    print("\n[추가 가능 옵션]")
+    for opt in store.list_options():
+        price_str = f"+{format_money(opt.extra_price)}" if opt.extra_price > 0 else "무료"
+        print(f"\t- {opt.name} ({price_str})")
 
 
 def handle_order(store: KioskStore, state: CLIState, args: list[str]) -> None:
@@ -212,7 +217,7 @@ def handle_pay(store: KioskStore, state: CLIState, args: list[str]) -> None:
 
 
 def print_order(order) -> None:
-    print(f"주문 #{order.id} ({format_status(order.status)})")
+    print(f"\n주문 #{order.id} ({format_status(order.status)})")
     if order.note:
         print(f"메모: {order.note}")
     if not order.items:
@@ -220,11 +225,21 @@ def print_order(order) -> None:
         return
 
     for idx, item in enumerate(order.items, start=1):
-        options = f" [{', '.join(item.options)}]" if item.options else ""
+        # 추가 금액 표시
+        if item.options:
+            opt_strs = [
+                f"{opt.name}(+{format_money(opt.extra_price)})" if opt.extra_price > 0 else opt.name 
+                for opt in item.options
+            ]
+            options_str = f" [{', '.join(opt_strs)}]"
+        else:
+            options_str = ""
+            
         print(
-            f"  {idx}. {item.name}{options} x{item.quantity}"
+            f"  {idx}. {item.name}{options_str} x{item.quantity}"
             f" - {format_money(item.line_total)}"
         )
+    print("-" * 30)
     print(f"합계: {format_money(order.total)}")
 
 

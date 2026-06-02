@@ -21,6 +21,12 @@ class MenuItem:
     category: str | None = None
     description: str | None = None
     is_available: bool = True
+    
+# MenuOption 클래스
+@dataclass(frozen=True)
+class MenuOption:
+    name: str
+    extra_price: int
 
 
 @dataclass
@@ -29,11 +35,14 @@ class OrderItem:
     name: str
     unit_price: int
     quantity: int
-    options: list[str] = field(default_factory=list)
+    # 기존 문자열 리스트에서 객체 리스트로 변경
+    options: list[MenuOption] = field(default_factory=list)
 
     @property
     def line_total(self) -> int:
-        return self.unit_price * self.quantity
+        # 금액 계산
+        options_total = sum(opt.extra_price for opt in self.options)
+        return (self.unit_price + options_total) * self.quantity
 
 
 @dataclass(frozen=True)

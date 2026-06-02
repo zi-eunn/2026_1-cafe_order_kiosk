@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from cafe_order_kiosk.models import MenuItem, Order, OrderItem, OrderStatus, Payment
+from cafe_order_kiosk.models import MenuItem, MenuOption, Order, OrderItem, OrderStatus, Payment
 from cafe_order_kiosk.utils import utc_now
 
 DEFAULT_MENU: tuple[MenuItem, ...] = (
@@ -18,17 +18,31 @@ DEFAULT_MENU: tuple[MenuItem, ...] = (
     MenuItem(id=10, name="Cheesecake", price=5200, category="dessert"),
 )
 
+# 기본 옵션 데이터
+DEFAULT_OPTIONS: tuple[MenuOption, ...] = (
+    MenuOption(name="샷추가", extra_price=500),
+    MenuOption(name="사이즈업", extra_price=1000),
+    MenuOption(name="디카페인", extra_price=300),
+    MenuOption(name="얼음많이", extra_price=0),
+    MenuOption(name="얼음적게", extra_price=0),
+)
 
 class KioskStore:
-    def __init__(self, menu_items: Iterable[MenuItem] | None = None) -> None:
+    # menu_options 인자
+    def __init__(self, menu_items: Iterable[MenuItem] | None = None, menu_options: Iterable[MenuOption] | None = None) -> None:
         self._menu: dict[int, MenuItem] = {item.id: item for item in (menu_items or [])}
+        self._options: dict[str, MenuOption] = {opt.name: opt for opt in (menu_options or [])}
         self._orders: dict[int, Order] = {}
         self._next_order_id = 1
 
     @classmethod
     def with_default_menu(cls) -> KioskStore:
-        return cls(menu_items=DEFAULT_MENU)
+        # 옵션 초기화
+        return cls(menu_items=DEFAULT_MENU, menu_options=DEFAULT_OPTIONS)
 
+    def list_options(self) -> list[MenuOption]:
+        return list(self._options.values())
+    
     def list_menu(self, only_available: bool = True) -> list[MenuItem]:
         items: Iterable[MenuItem] = self._menu.values()
         if only_available:
@@ -74,12 +88,20 @@ class KioskStore:
         if not menu_item.is_available:
             raise ValueError("Menu item is not available")
 
+        valid_options = []
+        if options:
+            for opt_name in options:
+                opt = self._options.get(opt_name)
+                if opt is None:
+                    raise ValueError(f"알 수 없는 옵션입니다: {opt_name}")
+                valid_options.append(opt)
+
         order_item = OrderItem(
             menu_item_id=menu_item.id,
             name=menu_item.name,
             unit_price=menu_item.price,
             quantity=quantity,
-            options=options or [],
+            options=valid_options,
         )
         order.items.append(order_item)
         return order
