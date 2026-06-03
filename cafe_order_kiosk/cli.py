@@ -45,6 +45,8 @@ def run_cli() -> int:
             handle_orders(store, args)
         elif command in {"결제", "pay"}:
             handle_pay(store, state, args)
+        elif command in {"포인트", "point"}:
+            handle_point(store, state, args)
         else:
             print("알 수 없는 명령입니다. '도움말'을 입력하세요.")
     print("종료합니다.")
@@ -61,7 +63,9 @@ def print_help() -> None:
     print("\t주문 조회")
     print("\t주문 취소")
     print("\t주문목록 목록 [진행중|결제완료|취소]")
-    print("\t결제 <방법> [금액]")
+    print("\t결제 <방법> [금액] [전화번호]")
+    print("\t포인트 조회 <전화번호>")
+    print("\t포인트 사용 <전화번호> <금액>")
     print("\t도움말")
     print("\t종료")
 
@@ -110,12 +114,7 @@ def handle_order(store: KioskStore, state: CLIState, args: list[str]) -> None:
         if menu_id is None or quantity is None:
             return
 
-        options_text = " ".join(tail[2:]).strip()
-        options = (
-            [option.strip() for option in options_text.split(",") if option.strip()]
-            if options_text
-            else []
-        )
+        options = tail[2:]
         try:
             store.add_item(state.current_order_id, menu_id, quantity, options)
         except ValueError as exc:
@@ -185,34 +184,83 @@ def handle_pay(store: KioskStore, state: CLIState, args: list[str]) -> None:
         print("선택된 주문이 없습니다. 먼저 '주문 생성'을 사용하세요.")
         return
     if not args:
-        print("사용법: 결제 <방법> [금액]")
+        print("사용법: 결제 <방법> [금액] [전화번호]")
         return
-
-    method = args[0]
-    amount = None
-    if len(args) > 1:
-        amount = parse_int_arg(args[1:2], "amount")
-        if amount is None:
-            return
 
     order = store.get_order(state.current_order_id)
     if order is None:
         print("주문을 찾을 수 없습니다.")
         return
-    if amount is None:
-        amount = order.total
+        
+    method = args[0]
+    # 금액이 입력되지 않을 경우 남은 전액 세딩
+    if len(args) > 1:
+        amount = parse_int_arg(args[1:2], "amount")
+        if amount is None:
+            return
+    else:
+        amount = order.final_total
+    # 세 번째 인자가 있으면 전화번호로 인식
+    phone = args[2] if len(args) > 2 else None
 
     try:
-        store.pay_order(order.id, method, amount)
+        store.pay_order(order.id, method, amount, phone)
     except ValueError as exc:
         print(str(exc))
         return
 
-    print(f"주문 #{order.id} 결제 완료 ({method}).")
+    print(f"주문 #{order.id} 결제가 완료되었습니다 ({method}: {format_money(amount)}원)")
+    if order.phone_number and amount > 0:
+        print(f"{order.phone_number} 님의 현재 누적 포인트: {format_money(store.get_points(order.phone_number))}P")
+
+
+def handle_point(store: KioskStore, state: CLIState, args: list[str]) -> None:
+    if not args:
+        print("사용법: 포인트 조회 <전화번호> 또는 포인트 사용 <전화번호> <금액>")
+        return
+
+    action, tail = args[0], args[1:]
+    
+    if action == "조회":
+        if not tail:
+            print("전화번호를 입력하세요.")
+            return
+        phone = tail[0]
+        points = store.get_points(phone)
+        print(f"{phone} 님의 현재 보유 포인트: {format_money(points)}P")
+        
+    elif action == "사용":
+        if state.current_order_id is None:
+            print("선택된 주문이 없습니다. 먼저 '주문 생성'을 사용하세요.")
+            return
+        if len(tail) < 2:
+            print("사용법: 포인트 사용 <전화번호> <금액>")
+            return
+            
+        phone = tail[0]
+        use_amount = parse_int_arg(tail[1:2], "points")
+        if use_amount is None:
+            return
+            
+        try:
+            store.use_points(state.current_order_id, phone, use_amount)
+        except ValueError as exc:
+            print(str(exc))
+            return
+            
+        print(f"포인트 {format_money(use_amount)}P가 성공적으로 적용되었습니다.")
+        
+        order = store.get_order(state.current_order_id)
+        if order.status == OrderStatus.PAID:
+            print("포인트 전액 결제로 주문이 완료되었습니다!")
+        else:
+            print(f"남은 결제 금액: {format_money(order.final_total)}원")
+    else:
+        print("알 수 없는 포인트 명령어입니다.")
 
 
 def print_order(order) -> None:
-    print(f"주문 #{order.id} ({format_status(order.status)})")
+    print(f"\n주문 #{order.id} ({format_status(order.status)})")
     if order.note:
         print(f"메모: {order.note}")
     if not order.items:
@@ -225,7 +273,15 @@ def print_order(order) -> None:
             f"  {idx}. {item.name}{options} x{item.quantity}"
             f" - {format_money(item.line_total)}"
         )
-    print(f"합계: {format_money(order.total)}")
+    print("-" * 30)
+    print(f"주문 총액: {format_money(order.total)}")
+    
+    if order.used_points > 0:
+        print(f"포인트 할인: -{format_money(order.used_points)}")
+        print(f"최종 결제 금액: {format_money(order.final_total)}")
+        
+    if order.payment:
+        print(f"결제 완료 ({order.payment.method}): {format_money(order.payment.amount)}")
 
 
 def parse_int_arg(args: list[str], name: str) -> int | None:

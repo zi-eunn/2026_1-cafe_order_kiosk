@@ -53,7 +53,16 @@ class Order:
     canceled_at: datetime | None = None
     note: str | None = None
     payment: Payment | None = None
+    
+    # 포인트 관리
+    used_points: int = 0
+    phone_number: str | None = None
 
     @property
     def total(self) -> int:
         return sum(item.line_total for item in self.items)
+    
+    @property
+    def final_total(self) -> int:
+        # 포인트 할인이 적용
+        return max(0, self.total - self.used_points)

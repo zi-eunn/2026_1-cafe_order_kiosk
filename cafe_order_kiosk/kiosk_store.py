@@ -24,6 +24,7 @@ class KioskStore:
         self._menu: dict[int, MenuItem] = {item.id: item for item in (menu_items or [])}
         self._orders: dict[int, Order] = {}
         self._next_order_id = 1
+        self._memberships: dict[str, int] = {} # 전화번호 기반 포인트 저장소
 
     @classmethod
     def with_default_menu(cls) -> KioskStore:
@@ -105,19 +106,52 @@ class KioskStore:
         order.canceled_at = utc_now()
         return order
 
-    def pay_order(self, order_id: int, method: str, amount: int) -> Order:
+    def get_points(self, phone: str) -> int:
+        return self._memberships.get(phone, 0)
+    
+    def use_points(self, order_id: int, phone: str, points: int) -> Order:
+        order = self._require_order(order_id)
+        if order.status is not OrderStatus.OPEN:
+            raise ValueError("Order is not open")
+        if self.get_points(phone) < points:
+            raise ValueError("보유 포인트가 부족합니다.")
+        if points > order.final_total:
+            raise ValueError("결제할 금액보다 많은 포인트를 사용할 수 없습니다.")
+
+        self._memberships[phone] = self.get_points(phone) - points
+        order.used_points += points
+        order.phone_number = phone
+
+        # 포인트 전액 결제
+        if order.final_total == 0:
+            self._complete_order(order, method="포인트전액결제", amount=0)
+        return order
+    
+    def pay_order(self, order_id: int, method: str, amount: int, phone: str | None = None) -> Order:
         order = self._require_order(order_id)
         if order.status is not OrderStatus.OPEN:
             raise ValueError("Order is not open")
         if not order.items:
             raise ValueError("Order has no items")
-        if amount != order.total:
-            raise ValueError("Payment amount does not match total")
+        
+        if amount != order.final_total:
+            raise ValueError(f"결제 금액이 일치하지 않습니다. (결제할 금액: {order.final_total}원)")
 
+        if phone:
+            order.phone_number = phone
+
+        self._complete_order(order, method, amount)
+        return order
+    
+    def _complete_order(self, order: Order, method: str, amount: int) -> None:
         order.status = OrderStatus.PAID
         order.paid_at = utc_now()
         order.payment = Payment(method=method, amount=amount, paid_at=order.paid_at)
-        return order
+
+        # 결제 금액 5% 포인트 적립
+        if order.phone_number and amount > 0:
+            earned_points = int(amount * 0.05)
+            self._memberships[order.phone_number] = self.get_points(order.phone_number) + earned_points
 
     def _require_order(self, order_id: int) -> Order:
         order = self._orders.get(order_id)
