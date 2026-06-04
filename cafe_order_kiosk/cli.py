@@ -32,6 +32,17 @@ def run_cli() -> int:
 
         tokens = shlex.split(raw)
         command, args = tokens[0], tokens[1:]
+        
+        # 결제 진행 중(부분 결제됨)일 때 다른 명령어 차단
+        if state.current_order_id:
+            order = store.get_order(state.current_order_id)
+            # 결제 내역이 1건 이상 존재하고, 아직 결제할 금액이 남아있다면
+            if order and order.payments and order.amount_due > 0:
+                # 결제와 종료(취소)만 예외로 허용
+                if command not in {"결제", "pay", "종료", "끝", "quit", "exit"}:
+                    print(f"⚠️ 현재 부분 결제가 진행 중입니다. (남은 결제 금액: {format_money(order.amount_due)}원)")
+                    print("나머지 금액을 모두 결제해야 다른 기능을 사용할 수 있습니다.")
+                    continue
 
         if command in {"종료", "끝", "quit", "exit"}:
             break
@@ -188,19 +199,20 @@ def handle_pay(store: KioskStore, state: CLIState, args: list[str]) -> None:
         print("사용법: 결제 <방법> [금액]")
         return
 
-    method = args[0]
-    amount = None
-    if len(args) > 1:
-        amount = parse_int_arg(args[1:2], "amount")
-        if amount is None:
-            return
-
     order = store.get_order(state.current_order_id)
     if order is None:
         print("주문을 찾을 수 없습니다.")
         return
-    if amount is None:
-        amount = order.total
+
+    method = args[0]
+    
+    # 금액을 입력하지 않으면 자동으로 남은 전액 세팅
+    if len(args) > 1:
+        amount = parse_int_arg(args[1:2], "amount")
+        if amount is None:
+            return
+    else:
+        amount = order.amount_due
 
     try:
         store.pay_order(order.id, method, amount)
@@ -208,11 +220,17 @@ def handle_pay(store: KioskStore, state: CLIState, args: list[str]) -> None:
         print(str(exc))
         return
 
-    print(f"주문 #{order.id} 결제 완료 ({method}).")
+    print(f"[{method}] {format_money(amount)}원 결제 승인.")
+    
+    # 결제 후 상태 확인
+    if order.status == OrderStatus.PAID:
+        print(f"주문 #{order.id} 결제가 완료되었습니다!")
+    else:
+        print(f"남은 결제 금액: {format_money(order.amount_due)}원")
 
 
 def print_order(order) -> None:
-    print(f"주문 #{order.id} ({format_status(order.status)})")
+    print(f"\n주문 #{order.id} ({format_status(order.status)})")
     if order.note:
         print(f"메모: {order.note}")
     if not order.items:
@@ -225,7 +243,14 @@ def print_order(order) -> None:
             f"  {idx}. {item.name}{options} x{item.quantity}"
             f" - {format_money(item.line_total)}"
         )
-    print(f"합계: {format_money(order.total)}")
+    print("-" * 30)
+    print(f"주문 총액: {format_money(order.total)}")
+
+    # 결제 내역 및 잔액 표시 기능 추가
+    if order.payments:
+        for p in order.payments:
+            print(f"결제 완료 ({p.method}): -{format_money(p.amount)}")
+        print(f"남은 결제 금액: {format_money(order.amount_due)}")
 
 
 def parse_int_arg(args: list[str], name: str) -> int | None:

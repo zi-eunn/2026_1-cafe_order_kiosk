@@ -111,12 +111,20 @@ class KioskStore:
             raise ValueError("Order is not open")
         if not order.items:
             raise ValueError("Order has no items")
-        if amount != order.total:
-            raise ValueError("Payment amount does not match total")
+        if amount <= 0:
+            raise ValueError("결제 금액은 0원보다 커야 합니다.")
+        if amount > order.amount_due:
+            raise ValueError(f"결제 금액이 남은 금액({order.amount_due}원)을 초과할 수 없습니다.")
 
-        order.status = OrderStatus.PAID
-        order.paid_at = utc_now()
-        order.payment = Payment(method=method, amount=amount, paid_at=order.paid_at)
+        # 결제 내역 추가
+        payment = Payment(method=method, amount=amount, paid_at=utc_now())
+        order.payments.append(payment)
+
+        # 남은 금액이 0원이 되면 최종 결제 완료 처리
+        if order.amount_due == 0:
+            order.status = OrderStatus.PAID
+            order.paid_at = utc_now()
+            
         return order
 
     def _require_order(self, order_id: int) -> Order:

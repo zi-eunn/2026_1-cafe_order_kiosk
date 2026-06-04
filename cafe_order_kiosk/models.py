@@ -54,6 +54,15 @@ class Order:
     note: str | None = None
     payment: Payment | None = None
 
+    # 여러 번의 결제를 담기 위한 리스트
+    payments: list[Payment] = field(default_factory=list)
+
     @property
     def total(self) -> int:
         return sum(item.line_total for item in self.items)
+
+    @property
+    def amount_due(self) -> int:
+        # 남은 결제 금액
+        paid_total = sum(p.amount for p in self.payments)
+        return max(0, self.total - paid_total)
